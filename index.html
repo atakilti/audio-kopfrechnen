@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Audio Kopfrechnen</title>
+
+  <!-- PWA / iOS Home-Screen -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Kopfrechnen">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <style>
+    body { font-family: system-ui; display:flex; flex-direction:column; gap:12px; padding:18px; }
+    button, select { font-size:18px; padding:12px; border-radius:14px; }
+    #ptt { font-size:22px; padding:16px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .box { padding:12px; border-radius:14px; background: rgba(0,0,0,0.06); }
+    .small { opacity: 0.85; }
+  </style>
+</head>
+<body>
+  <h2>Audio Kopfrechnen</h2>
+
+  <div class="row">
+    <label>
+      Level:
+      <select id="levelSelect"></select>
+    </label>
+    <button id="start">Runde starten (10)</button>
+    <button id="repeat" disabled>?? Repeat</button>
+  </div>
+
+  <div class="box">
+    <div><b>Status:</b> <span id="status">Drücke Start.</span></div>
+    <div class="small">
+      Aufgabe: <span id="qnum">0</span>/10 |
+      Richtig: <span id="correct">0</span> |
+      Falsch: <span id="wrong">0</span>
+    </div>
+    <div class="small">
+      Rundenzeit: <span id="time">0.0</span>s
+    </div>
+    <div class="small">
+      Tipp: Antworte als Ziffern (z.B. "eins zwei null null") oder bei Rest "7 Rest 2".
+    </div>
+  </div>
+
+  <button id="ptt" disabled>??? Gedrückt halten zum Antworten</button>
+
+<script>
+  // ---------------- Level config ----------------
+  const LEVELS = [
+    { name: "L1  (1–9)×(10–99)", op:"mul", a:[1,9], b:[10,99] },
+    { name: "L2  (1–9)×(100–999)", op:"mul", a:[1,9], b:[100,999] },
+    { name: "L3  (1–9)×(1k–9,999)", op:"mul", a:[1,9], b:[1000,9999] },
+    { name: "L4  (1–9)×(10k–99,999)", op:"mul", a:[1,9], b:[10000,99999] },
+
+    { name: "L5  (10–99)×(10–99)", op:"mul", a:[10,99], b:[10,99] },
+    { name: "L6  (10–99)×(100–999)", op:"mul", a:[10,99], b:[100,999] },
+    { name: "L7  (10–99)×(1k–9,999)", op:"mul", a:[10,99], b:[1000,9999] },
+    { name: "L8  (10–99)×(10k–99,999)", op:"mul", a:[10,99], b:[10000,99999] },
+
+    { name: "L9  (100–999)×(100–999)", op:"mul", a:[100,999], b:[100,999] },
+    { name: "L10 (100–999)×(1k–9,999)", op:"mul", a:[100,999], b:[1000,9999] },
+    { name: "L11 (100–999)×(10k–99,999)", op:"mul", a:[100,999], b:[10000,99999] },
+
+    { name: "L12 (1k–9,999)×(1k–9,999)", op:"mul", a:[1000,9999], b:[1000,9999] },
+    { name: "L13 (1k–9,999)×(10k–99,999)", op:"mul", a:[1000,9999], b:[10000,99999] },
+    { name: "L14 (10k–99,999)×(10k–99,999)", op:"mul", a:[10000,99999], b:[10000,99999] },
+
+    { name: "L15 ÷ (2–9), Ergebnis (10–99)", op:"div", d:[2,9], q:[10,99] },
+    { name: "L16 ÷ (2–9), Ergebnis (100–999)", op:"div", d:[2,9], q:[100,999] },
+    { name: "L17 ÷ (2–9), Ergebnis (1k–9,999)", op:"div", d:[2,9], q:[1000,9999] },
+    { name: "L18 ÷ (2–9), Ergebnis (10k–99,999)", op:"div", d:[2,9], q:[10000,99999] },
+
+    { name: "L19 ÷ (10–99), Ergebnis (10–99)", op:"div", d:[10,99], q:[10,99] },
+    { name: "L20 ÷ (10–99), Ergebnis (100–999)", op:"div", d:[10,99], q:[100,999] },
+    { name: "L21 ÷ (100–999), Ergebnis (10–99)", op:"div", d:[100,999], q:[10,99] },
+    { name: "L22 ÷ (100–999), Ergebnis (100–999)", op:"div", d:[100,999], q:[100,999] },
+    { name: "L23 ÷ (1k–9,999), Ergebnis (10–99)", op:"div", d:[1000,9999], q:[10,99] },
+    { name: "L24 ÷ (1k–9,999), Ergebnis (100–999)", op:"div", d:[1000,9999], q:[100,999] },
+
+    { name: "L25 ÷ Rest (10–99)/(2–9)", op:"divrest", dividend:[10,99], divisor:[2,9] },
+    { name: "L26 ÷ Rest (100–999)/(2–9)", op:"divrest", dividend:[100,999], divisor:[2,9] },
+    { name: "L27 ÷ Rest (100–999)/(10–99)", op:"divrest", dividend:[100,999], divisor:[10,99] },
+    { name: "L28 ÷ Rest (1k–9,999)/(10–99)", op:"divrest", dividend:[1000,9999], divisor:[10,99] },
+    { name: "L29 ÷ Rest (1k–9,999)/(100–999)", op:"divrest", dividend:[1000,9999], divisor:[100,999] },
+    { name: "L30 ÷ Rest (10k–99,999)/(100–999)", op:"divrest", dividend:[10000,99999], divisor:[100,999] },
+  ];
+
+  function rint(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+  // ---------------- UI refs ----------------
+  const levelSelect = document.getElementById("levelSelect");
+  const startBtn = document.getElementById("start");
+  const repeatBtn = document.getElementById("repeat");
+  const pttBtn = document.getElementById("ptt");
+
+  const statusEl = document.getElementById("status");
+  const qnumEl = document.getElementById("qnum");
+  const correctEl = document.getElementById("correct");
+  const wrongEl = document.getElementById("wrong");
+  const timeEl = document.getElementById("time");
+
+  // Fill levels
+  LEVELS.forEach((L, idx) => {
+    const opt = document.createElement("option");
+    opt.value = String(idx+1);
+    opt.textContent = L.name;
+    levelSelect.appendChild(opt);
+  });
+  levelSelect.value = "1";
+
+  // ---------------- Round settings ----------------
+  const QUESTIONS_PER_ROUND = 10;
+  const TIME_LIMIT_MS = 6000;
+  let questionTimer = null;
+  let answeredThisQuestion = false;
+
+  // ---------------- TTS ----------------
+  function speak(text) {
+    return new Promise((resolve) => {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "de-DE";
+      u.rate = 0.95;
+      u.onend = resolve;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    });
+  }
+
+  // ---------------- Beeps ----------------
+  let audioCtx = null;
+  function ensureAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+  function tone(freq, ms, vol=0.10) {
+    ensureAudioCtx();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.value = vol;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    setTimeout(() => o.stop(), ms);
+  }
+  function beepOnce(){ tone(660, 130, 0.12); }
+  function beepDouble(){ beepOnce(); setTimeout(beepOnce, 180); }
+  function beepStart(){ tone(880, 90, 0.10); }
+  function beepEnd(){ tone(440, 120, 0.10); setTimeout(()=>tone(330, 140, 0.10), 170); }
+
+  // ---------------- Speech Recognition (iPhone) ----------------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+
+  function initRecognition() {
+    if (!SR) {
+      setStatus("? Safari unterstützt SpeechRecognition hier nicht. Dann brauchst du eine Server-STT (Whisper).");
+      return false;
+    }
+    recognition = new SR();
+    recognition.lang = "de-DE";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    return true;
+  }
+
+  function setStatus(s){ statusEl.textContent = s; }
+
+  // ---------------- Task generation ----------------
+  function genTask(level) {
+    const L = LEVELS[level-1] ?? LEVELS[0];
+
+    if (L.op === "mul") {
+      let a = rint(L.a[0], L.a[1]);
+      let b = rint(L.b[0], L.b[1]);
+      if (Math.random() < 0.5) [a,b] = [b,a];
+      return {
+        op:"mul",
+        ans: { q: a*b, r: 0 },
+        spokenParts: ["Aufgabe.", `${a}.`, "mal.", `${b}.`]
+      };
+    }
+
+    if (L.op === "div") {
+      const divisor = rint(L.d[0], L.d[1]);
+      const quotient = rint(L.q[0], L.q[1]);
+      const dividend = divisor * quotient;
+      return {
+        op:"div",
+        ans: { q: quotient, r: 0 },
+        spokenParts: ["Aufgabe.", `${dividend}.`, "geteilt durch.", `${divisor}.`]
+      };
+    }
+
+    // divrest
+    const dividend = rint(L.dividend[0], L.dividend[1]);
+    const divisor  = rint(L.divisor[0], L.divisor[1]);
+    const q = Math.floor(dividend / divisor);
+    const r = dividend % divisor;
+
+    return {
+      op:"divrest",
+      ans: { q, r },
+      spokenParts: ["Aufgabe.", `${dividend}.`, "geteilt durch.", `${divisor}.`, "Nenne Quotient und Rest."]
+    };
+  }
+
+  async function speakTask(task) {
+    for (const part of task.spokenParts) {
+      await speak(part);
+    }
+  }
+
+  // Parse answer: "1200" or "7 rest 2" or "7 2" or spoken digits "eins zwei null null"
+  function parseAnswer(text) {
+    const t = (text || "").toLowerCase().replaceAll("-", " ");
+    const nums = t.match(/\d+/g);
+    if (nums && nums.length >= 1) {
+      return { q: parseInt(nums[0],10), r: nums.length >= 2 ? parseInt(nums[1],10) : 0 };
+    }
+    const map = { "null":"0","eins":"1","ein":"1","zwei":"2","drei":"3","vier":"4","fünf":"5","funf":"5","sechs":"6","sieben":"7","acht":"8","neun":"9" };
+    const parts = t.split(/\s+/).filter(Boolean);
+    let out = "";
+    for (const p of parts) if (map[p] != null) out += map[p];
+    if (out.length) return { q: parseInt(out,10), r: 0 };
+    return null;
+  }
+
+  // ---------------- Round state ----------------
+  let roundRunning = false;
+  let currentLevel = 1;
+  let qIndex = 0;
+  let correct = 0;
+  let wrong = 0;
+  let roundStartPerf = 0;
+  let currentTask = null;
+
+  function updateHUD() {
+    qnumEl.textContent = String(Math.min(qIndex, QUESTIONS_PER_ROUND));
+    correctEl.textContent = String(correct);
+    wrongEl.textContent = String(wrong);
+    if (roundRunning) {
+      const secs = (performance.now() - roundStartPerf) / 1000;
+      timeEl.textContent = secs.toFixed(1);
+    }
+  }
+
+  async function startRound() {
+    ensureAudioCtx();
+    if (!recognition && !initRecognition()) return;
+
+    currentLevel = parseInt(levelSelect.value,10);
+    roundRunning = true;
+    qIndex = 0;
+    correct = 0;
+    wrong = 0;
+    roundStartPerf = performance.now();
+    updateHUD();
+
+    // Lock controls
+    startBtn.disabled = true;
+    levelSelect.disabled = true;
+    repeatBtn.disabled = true;
+    pttBtn.disabled = true;
+
+    await speak("Runde startet. Zehn Aufgaben.");
+    await speak("Antworte als Zahl. Bei Rest: Quotient und Rest.");
+
+    await nextQuestion();
+  }
+
+  async function nextQuestion() {
+    if (!roundRunning) return;
+
+    qIndex += 1;
+    updateHUD();
+
+    if (qIndex > QUESTIONS_PER_ROUND) {
+      return endRound();
+    }
+
+    currentTask = genTask(currentLevel);
+    answeredThisQuestion = false;
+
+    repeatBtn.disabled = true;
+    pttBtn.disabled = true;
+
+    setStatus("?? Höre Aufgabe…");
+    await speakTask(currentTask);
+
+    // Start answer window
+    beepStart();
+    setStatus("Antworte jetzt.");
+    repeatBtn.disabled = false;
+    pttBtn.disabled = false;
+
+    clearTimeout(questionTimer);
+    questionTimer = setTimeout(() => {
+      if (!answeredThisQuestion && roundRunning) {
+        wrong++;
+        updateHUD();
+        beepOnce();
+        setStatus("?? Zeit abgelaufen.");
+        nextQuestion();
+      }
+    }, TIME_LIMIT_MS);
+  }
+
+  async function endRound() {
+    roundRunning = false;
+    clearTimeout(questionTimer);
+
+    beepEnd();
+    pttBtn.disabled = true;
+    repeatBtn.disabled = true;
+
+    const totalSecs = (performance.now() - roundStartPerf) / 1000;
+    setStatus(`Runde beendet. Richtig: ${correct}. Falsch: ${wrong}. Zeit: ${totalSecs.toFixed(1)} Sekunden.`);
+    updateHUD();
+
+    await speak(`Runde beendet. Richtig ${correct}. Falsch ${wrong}. Zeit ${Math.round(totalSecs)} Sekunden.`);
+
+    // Unlock
+    startBtn.disabled = false;
+    levelSelect.disabled = false;
+  }
+
+  // ---------------- Push-to-talk via SpeechRecognition ----------------
+  let srBusy = false; // iOS stability guard
+
+  function startListening() {
+    if (!roundRunning || !recognition || pttBtn.disabled) return;
+    if (srBusy) return;
+    srBusy = true;
+
+    answeredThisQuestion = true;
+    clearTimeout(questionTimer);
+
+    setStatus("??? Höre zu…");
+
+    let finalText = "";
+
+    recognition.onresult = (event) => {
+      finalText = event.results?.[0]?.[0]?.transcript || "";
+    };
+
+    recognition.onerror = () => {
+      srBusy = false;
+      wrong++;
+      updateHUD();
+      beepOnce();
+      nextQuestion();
+    };
+
+    recognition.onend = () => {
+      srBusy = false;
+
+      const parsed = parseAnswer(finalText);
+
+      if (!parsed || !currentTask) {
+        wrong++;
+        updateHUD();
+        beepOnce();
+        return nextQuestion();
+      }
+
+      const ok = (parsed.q === currentTask.ans.q) && (parsed.r === currentTask.ans.r);
+
+      if (ok) { correct++; beepDouble(); }
+      else { wrong++; beepOnce(); }
+
+      updateHUD();
+      nextQuestion();
+    };
+
+    try { recognition.start(); }
+    catch (e) {
+      srBusy = false;
+      wrong++;
+      updateHUD();
+      beepOnce();
+      nextQuestion();
+    }
+  }
+
+  function stopListening() {
+    if (!recognition) return;
+    try { recognition.stop(); } catch(e) {}
+  }
+
+  // ---------------- Events ----------------
+  startBtn.onclick = async () => {
+    await startRound();
+  };
+
+  repeatBtn.onclick = async () => {
+    if (!roundRunning || !currentTask) return;
+
+    answeredThisQuestion = false;
+    clearTimeout(questionTimer);
+
+    pttBtn.disabled = true;
+    repeatBtn.disabled = true;
+    setStatus("?? Wiederhole Aufgabe…");
+
+    await speakTask(currentTask);
+
+    beepStart();
+    setStatus("Antworte jetzt.");
+    repeatBtn.disabled = false;
+    pttBtn.disabled = false;
+
+    clearTimeout(questionTimer);
+    questionTimer = setTimeout(() => {
+      if (!answeredThisQuestion && roundRunning) {
+        wrong++;
+        updateHUD();
+        beepOnce();
+        setStatus("?? Zeit abgelaufen.");
+        nextQuestion();
+      }
+    }, TIME_LIMIT_MS);
+  };
+
+  // PTT: touch + mouse
+  pttBtn.addEventListener("touchstart", (e)=>{ e.preventDefault(); startListening(); }, {passive:false});
+  pttBtn.addEventListener("touchend",   (e)=>{ e.preventDefault(); stopListening(); }, {passive:false});
+  pttBtn.addEventListener("mousedown", ()=> startListening());
+  pttBtn.addEventListener("mouseup",   ()=> stopListening());
+
+  // HUD refresh
+  setInterval(() => { if (roundRunning) updateHUD(); }, 150);
+
+  // Initialize recognition early (optional)
+  initRecognition();
+
+  // Service worker registration (PWA)
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js");
+  }
+</script>
+</body>
+</html>
